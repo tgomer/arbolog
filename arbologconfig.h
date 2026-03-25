@@ -6,6 +6,11 @@
 #include "arbolog.h"
 #include "wsenisds.h"
 
+#include <ArduinoJson.h>
+#include "sdcard.h"
+
+extern StaticJsonDocument<1024> JSONConfig;
+extern sdcard SDCard;
 
 const char *GYRO_ADDR = "%GY%";
 const char *ACC_ADDR = "%AC%"; 
@@ -24,7 +29,11 @@ class ArbologConfig{
     float a;
     float b;
     String serverAdress;
+    int port;
     bool configmode;
+    float longitude;
+    float latitude;
+    float height;
     int nVibration;
     int EEPROMSIZE;
     char buffer[1024];
@@ -214,6 +223,31 @@ class ArbologConfig{
     pinMode(VOLTAGEPIN, INPUT);
     pinMode(TEMPERATUREPIN, INPUT);
     analogReadResolution(10);
+#ifdef SDCARD
+    // read config from SD card
+    SDCard.readConfig();
+    devicename = (char *) JSONConfig["device"].as<const char*>();
+    Serial.println(devicename);
+    serverAdress = (char *) JSONConfig["server"].as<const char*>();
+    Serial.println(serverAdress);
+    port = (int) JSONConfig["port"].as<int>();
+    Serial.print("port: ");
+    Serial.println(port);
+    longitude = JSONConfig["longitude"].as<float>();
+    Serial.print("longitude: ");
+    Serial.println(longitude);
+    latitude = JSONConfig["latitude"].as<float>();
+    Serial.print("latitude: ");
+    Serial.println(latitude);
+    height = JSONConfig["height"].as<float>();
+    Serial.print("height: ");
+    Serial.println(height);
+    if (JSONConfig["pin"]){
+      Serial.print("pin: ");
+      setPin(JSONConfig["pin"].as<const char*>());
+    }
+    Serial.println(pin);
+#else
     EEPROMSIZE = EEPROM.length();
     if (!isEEPROMinitialized()) 
       return;
@@ -222,6 +256,36 @@ class ArbologConfig{
     pin = getPinFromEEPROM(); //"1862";
     devicename = getDeviceFromEEPROM();
     serverAdress = getServernameFromEEPROM(); //"http://gdg5tt9hs96lodss.myfritz.net:8088";
+  #endif
+  configureWifiAdapter();
+  }
+
+  public: void configureWifiAdapter(void){
+    char *ssid;
+    char *pass;
+    Serial1.println("");
+    String toSend("setssids ");
+    int index = 0;
+    while (ssid = (char *) JSONConfig["WLAN"][index]["SSID"].as<const char*>()){
+      if (index)
+        toSend = toSend + ",";
+      toSend = toSend + ssid;
+      toSend = toSend + " ";
+      pass = (char *) JSONConfig["WLAN"][index]["passcode"].as<const char*>();
+      if (pass) toSend = toSend + pass;
+      index++;
+      }
+    Serial1.println(toSend);
+    toSend = "sethostname ";
+    toSend = toSend + (char *) JSONConfig["device"].as<const char*>();;
+    Serial1.println(toSend);
+    toSend = "setclientversion ";
+    toSend = toSend + VERSION;
+    Serial1.println(toSend);
+    toSend = "setserver ";
+    toSend = toSend + serverAdress;
+    Serial1.println(toSend);
+    Serial1.println("start");
   }
 
 // The first entry up to \n
@@ -249,7 +313,20 @@ class ArbologConfig{
     return buffer;
   }
   
-  // The second
+  public: String getPasscode(const char* SSID){
+    char* ssid;
+    char* pass;
+    int index = 0;
+    while (ssid = (char *) JSONConfig["WLAN"][index]["SSID"].as<const char*>()){
+      if (!strcmp(SSID,ssid)){
+        pass = (char *) JSONConfig["WLAN"][index]["passcode"].as<const char*>();
+        return (pass);
+      }
+      index++;
+    }
+    return ("");
+  }
+  
   private: String getDeviceFromEEPROM(void){
     if (!EEPROM.isValid())
       return "";
@@ -364,6 +441,10 @@ class ArbologConfig{
       if (!(i % 80) ) SerialUSB.println();
     }
   }
+
+
+
+
 };
 
 #endif

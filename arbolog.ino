@@ -19,7 +19,14 @@ Configuration options:
     #setpin <pin>
     afterwards #update
 
-Akku: us18650vtc4
+  New: Configuration vis SD card contents
+    SD card needs a FAT32 file system
+    the first volume is readable
+    configuration file: arbolog.cfg
+
+
+
+Akku: us18650vtc4/INR18650-35E
 
 */
 
@@ -39,6 +46,7 @@ Akku: us18650vtc4
 #include "adrastea.h"
 #include "arbologconfig.h"
 
+#include "sdcard.h"
 #include "wsenisds.h"
 #include "cli.h"
 
@@ -48,7 +56,9 @@ Akku: us18650vtc4
 // Use 0-2. Larger for more debugging messages
 #define FLASH_DEBUG       0
 
+#include <ArduinoJson.h>
 
+StaticJsonDocument<1024> JSONConfig;
 
 // To be included only in main(), .ino with setup() to avoid `Multiple Definitions` Linker Error
 //#include "ISR_Timer_Generic.h"
@@ -65,6 +75,7 @@ String from_usb = "";
 Adrastea adrastea;
 ArbologConfig arbologConfig;
 RTCZero rtc;
+sdcard SDCard;
 WSENISDS wsen;
 SRAM_23LC SRAM(&SPI, SRAM_SELECT_PIN, SRAM_23LCV1024);
 Adafruit_NeoPixel pixels(NUMPIXELS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
@@ -90,28 +101,30 @@ void TimerHandler(){
 
 void setup()
 {
-  SPI.begin();
-  SRAM.begin();
-  pixels.begin();
-  pixels.setPixelColor(0, pixels.Color(125,125,0));
-  pixels.setPixelColor(1, pixels.Color(0,125,255));
-  pixels.show();
-
   SerialUSB.begin(115200);
   Serial1.begin(57600);
-//   while(!SerialUSB);
+  while(!Serial);
 
-  Serial.print(F("\nStart EEPROM_read on "));
+  SPI.begin();
+  SRAM.begin();
+  SDCard.begin();
+
+  pixels.begin();
+//  pixels.setPixelColor(0, pixels.Color(125,125,0));
+//  pixels.setPixelColor(1, pixels.Color(0,125,255));
+//  pixels.show();
+
   Serial.println(BOARD_NAME);
   Serial.println(FLASH_STORAGE_SAMD_VERSION);
 
   Serial.print("EEPROM length: ");
   Serial.println(EEPROM.length());
-  // EEPROM length is 1024
-
+  
   pixels.setPixelColor(1, pixels.Color(0,0,0));
+  pixels.setPixelColor(0, pixels.Color(0,0,0));
   pixels.show();
-arbologConfig.begin();
+  arbologConfig.begin();
+  Serial.println(arbologConfig.getPasscode("james-tiberius-kirk"));
   rtc.begin();
   rtc.attachInterrupt(alarm);
 
@@ -189,21 +202,17 @@ arbologConfig.begin();
   #endif
 
   #ifdef WLAN
-    sendData("clear",1000,false);
-    char buffer[50];
-    if (arbologConfig.getDevicename() != ""){
-      sprintf(buffer, "sethostname %s", arbologConfig.getDevicename().c_str());
-      SerialUSB.println(buffer);
-      sendData(buffer,1000,false);
-      delay(10000);
-    }
-    sprintf(buffer, "setclientversion %s", VERSION);
     
 /*    SerialUSB.println("obtaining date");
     String response=sendData("print date",3000,true);
     SerialUSB.print("print date:");
     SerialUSB.println(response);
     setRtcFromString(response);*/
+    pinMode(MODULE_WAKEUP, OUTPUT);
+    // Enable WLAN module
+    digitalWrite(MODULE_WAKEUP, LOW);
+    pinMode(MODULE_POWER, OUTPUT);
+    digitalWrite(MODULE_POWER, HIGH);
   #endif
 
     ITimer.setTimer(TIMER_INTERVAL_MS, TimerHandler, 10);
@@ -216,12 +225,16 @@ arbologConfig.begin();
  
 String from_Serial1 = "";
 
+bool blink = false;
+unsigned long blinkinterval = 0;
+
 void loop()
 {
   // process the serial lines 
   processSerial1();
   processSerialUSB();
   //
+  /*
   if (rtc.getYear() < 23 || rtc.getYear() > 35){
     SerialUSB.print(rtc.getYear());
     
@@ -231,6 +244,7 @@ void loop()
     setRtcFromString(response);
     delay(1000);
   }
+  */
   // process interrupt events 
   if (btnpress){
     btnpress = false;
@@ -242,6 +256,17 @@ void loop()
       vibration = 0;
     processVibration();
     delay(100);
+  }
+  if (millis() - blinkinterval > 300){
+    blinkinterval = millis();
+    if (blink){
+      blink = false;
+      digitalWrite(MODULE_WAKEUP, LOW);
+    }
+    else{
+      blink = true;
+      digitalWrite(MODULE_WAKEUP, HIGH);
+    }
   }
 }
 
@@ -281,7 +306,7 @@ void processSerial1(){
           from_Serial1 += (char)c;
       }
       else{
-        cli(from_Serial1, Serial1);
+        cli(from_Serial1, Serial1, true);
         from_Serial1 = "";
       }        
       yield();
@@ -295,7 +320,7 @@ void processSerialUSB(){
         from_usb = SerialUSB.readStringUntil('\r');
         if (!from_usb.equals("")){
           if(from_usb.startsWith("#")){
-            cli(from_usb, SerialUSB);
+            cli(from_usb, SerialUSB, false);
           }
           else{
             sendData(from_usb, 0, DEBUG);
@@ -352,6 +377,8 @@ void processVibration(){
     sendString = sendString + getRTCDate();
     sendString += "\",\"temp\":";
     sendString = sendString + ((int) floor(arbologConfig.getTemperature()*10));
+    sendString += ",\"voltage\":";
+    sendString = sendString + ((int) floor(arbologConfig.getAkkuVoltage()*10));
     sendString += ",\"data\":[";
     for (int measures = 0; measures < 10; measures++){
       long measure = millis();  
@@ -380,12 +407,16 @@ void processVibration(){
       if (lastsec != time[5]){
         lastsec = time[5];
         tenthsecond = '0';
-      }
-      sendString = sendString + time + tenthsecond++;
+      }    
+//      sendString = sendString + time + tenthsecond++;
+//     sendString = sendString + (",");
+      
       if (tenthsecond > '9')
         tenthsecond = '0';
-//      sendString = sendString + tenthsecond++;
-      sendString = sendString + (",");
+        sendString = sendString + getSecondsOfDay();
+        sendString = sendString + tenthsecond++;
+      sendString = sendString + ",";
+      
 //      sendString = sendString + measures;
 //      sendString = sendString + (",");
       sendString = sendString + ((int) floor(Ax));

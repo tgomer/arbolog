@@ -22,6 +22,8 @@ Digital Pins:
 28 -> PA14   -  Button
 27 -> PA13   -  LEDs
 
+SD select -  PIN_SPI1_SS;
+
 EEPROM length: 1024
 */
 
@@ -32,8 +34,6 @@ EEPROM length: 1024
 
 #define SRAM_SELECT_PIN		0
 
-// The RGB LEDs connected to Pin 4
-#define NEOPIXEL_PIN        27
 // How many NeoPixels are attached to the Arduino?
 #define NUMPIXELS 2 
 
@@ -48,9 +48,14 @@ EEPROM length: 1024
 #define DEBUG true
 #define MODE_1A
  
+#define SDCARD
+
 #define LTE_PWRKEY_PIN 5
 #define LTE_RESET_PIN 6
 #define LTE_FLIGHT_PIN 7
+
+#define MODULE_POWER 31
+#define MODULE_WAKEUP 20
 
 #define ADASTEASD_PIN 26
 

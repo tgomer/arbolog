@@ -2,7 +2,7 @@
 #define __CLI_H__
 
 #include "arbologconfig.h"
-#
+
 extern ArbologConfig arbologConfig;
 extern WSENISDS wsen;
 extern RTCZero rtc;
@@ -95,6 +95,13 @@ String getRTCTime(){
   return retval;
 }
 
+int getSecondsOfDay(){
+  int retval =  rtc.getHours() * 3600;
+  retval += rtc.getMinutes() * 60;
+  retval += rtc.getSeconds();
+  return retval;
+}
+
 String getRTCDateTime(){
   char retval[25];
   sprintf(retval, "%04d%02d%02d %02d%02d%02d",  rtc.getYear()+2000, rtc.getMonth(), rtc.getDay(), 
@@ -102,14 +109,22 @@ String getRTCDateTime(){
   return retval;
 }
 
-void cli(const String & from_Serial, Stream& port){
+void cli(const String & from_Serial, Stream& port, boolean replyCommand){
+  Serial.println(from_Serial);
+    if (from_Serial.startsWith("Unknown")){
+      Serial.println(from_Serial);
+      return;
+    }
     if (from_Serial.startsWith("#echo")){
       port.print(from_Serial);
     }
     else if (from_Serial.startsWith("#getdate")){
+      if(replyCommand) 
+        port.print("#setdate ");
       port.println(getRTCDateTime());
     }
     else if (from_Serial.startsWith("#setdate")){
+      Serial.println(from_Serial);
       setRtcFromString(from_Serial.c_str()+9);
       SerialUSB.println(getRTCDateTime());
     }
@@ -117,10 +132,10 @@ void cli(const String & from_Serial, Stream& port){
       port.println(arbologConfig.getAkkuVoltage());
     }
     else if (from_Serial.startsWith("#start")){
-      String response=sendData("print date",3000,true);
-      SerialUSB.print("print date:");
-      SerialUSB.println(response);
-      setRtcFromString(response);
+//      String response=sendData("print date",3000,true);
+//      SerialUSB.print("print date:");
+//      SerialUSB.println(response);
+//      setRtcFromString(response);
 
       arbologConfig.startSampling();
       port.print("started");
@@ -270,6 +285,17 @@ void cli(const String & from_Serial, Stream& port){
     else if (from_Serial.startsWith("#dump")){
       arbologConfig.dumpEEPROM();
     }
+    else if (from_Serial.startsWith("#getpasscode")){
+      int pos = from_Serial.indexOf(' ');
+      port.print(from_Serial);
+      port.print(" ");
+      port.println(arbologConfig.getPasscode(from_Serial.substring(pos+1).c_str()).c_str());
+    }
+    else if (from_Serial.startsWith("#gethostname")){
+      port.print(from_Serial);
+      port.print(" ");
+      port.println(arbologConfig.getDevicename());
+    }
     else if (from_Serial.startsWith("#setdevice")){
       int pos = from_Serial.indexOf(' ');
       arbologConfig.setDevicename(from_Serial.substring(pos+1));
@@ -317,7 +343,7 @@ void cli(const String & from_Serial, Stream& port){
     }
     else if (from_Serial.length()){
       port.println(from_Serial);
-      port.println("invalid command");
+      port.println("Unknown command");
     }
 }
 
